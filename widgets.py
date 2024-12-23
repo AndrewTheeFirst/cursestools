@@ -2,11 +2,7 @@ import curses
 from curses import window
 from .utils import *
 from .consts import *
-from . import consts as c
 from threading import Event
-
-Pad = window
-Dir = int
 
 class _CurseWidget:
     def __init__(self):
@@ -30,15 +26,15 @@ class Console(_CurseWidget):
     def shift(self, dir: Dir, unit: int = 1):
         '''Shift the console in "dir" directiion "unit" units.'''
         match (dir):
-            case c.UP:
+            case Dir.UP:
                 max_y = self._self.getmaxyx()[0] - 1
                 self.cur_y += unit if self.cur_y + unit <= max_y else 0
-            case c.DOWN: 
+            case Dir.DOWN: 
                 self.cur_y -= unit if self.cur_y - unit >= 0 else 0
-            case c.LEFT:
+            case Dir.LEFT:
                 max_x = self._self.getmaxyx()[1] - 1
                 self.cur_x += unit if self.cur_x + unit <= max_x else 0
-            case c.RIGHT:
+            case Dir.RIGHT:
                 self.cur_x -= unit if self.cur_x - unit >= 0 else 0
     
     def reset_offset(self):
@@ -76,7 +72,7 @@ class TextBox(_CurseWidget):
         self.noutrefresh()
         curses.doupdate()
 
-    def proc_key(self, key: str):
+    def proc_key(self, key: ChType):
         '''
         Process a keystroke.\n
         Supports Enter, Backspace, Ctrl-Backspace, and Printable Chars.\n

@@ -1,9 +1,7 @@
 import curses
 from curses import window
-from typing import TypeAlias
+from .consts import ChType, Pad
 from time import sleep
-
-_ChType: TypeAlias = str | bytes | int
 
 def draw_box(beg_y: int, beg_x: int, height: int, width: int, window: window):
     '''Draw a box at specified at (beg_y, beg_x) with specified (height, width)'''
@@ -26,7 +24,7 @@ def draw_button(beg_y: int, beg_x: int, height: int, width: int, window: window,
     start_y = beg_y + (height - 1) // 2
     window.addstr(start_y, start_x, text)
 
-def is_printable(char: _ChType):
+def is_printable(char: ChType):
     '''Returns False for Chars whose ascii values are not within 32 and 126'''
     return (len(char) == 1) and (32 <= ord(char)) and (ord(char) <= 126)
 
@@ -67,7 +65,7 @@ def wread(window: window, arg_1: str | int, arg_2: int = 1, message: str = "", s
         window.addch(char)
         window.refresh()
 
-def cover(window: window, veil: window = None):
+def cover(window: window, veil: Pad = None):
     '''
     cover/hide a window via a temporary pad -- "veil" (calls curses.doupdate)\n
     cover is destructive and will clear and deallocate veil.'''
