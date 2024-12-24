@@ -2,20 +2,11 @@ import curses
 from curses import window
 from .consts import ChType, Pad
 from time import sleep
+from curses.textpad import rectangle
 
 def draw_box(beg_y: int, beg_x: int, height: int, width: int, window: window):
     '''Draw a box at specified at (beg_y, beg_x) with specified (height, width)'''
-    window.hline(beg_y, beg_x + 1, curses.ACS_HLINE, width - 2)
-    window.hline(beg_y + height - 1, beg_x + 1, curses.ACS_HLINE, width - 2)
-
-    window.vline(beg_y + 1, beg_x, curses.ACS_VLINE, height - 2)
-    window.vline(beg_y + 1, beg_x + width - 1, curses.ACS_VLINE, height - 2)
-    
-    window.addch(beg_y, beg_x, curses.ACS_ULCORNER)
-    window.addch(beg_y, beg_x + width - 1, curses.ACS_URCORNER)
-
-    window.addch(beg_y + height - 1, beg_x, curses.ACS_LLCORNER)
-    window.addch(beg_y + height - 1, beg_x + width - 1, curses.ACS_LRCORNER)
+    rectangle(window, beg_y, beg_x, beg_y + height - 1, beg_x + width - 1)
 
 def draw_button(beg_y: int, beg_x: int, height: int, width: int, window: window, text: str = ""):
     '''Draw a button with optional text (centered)'''
@@ -36,7 +27,7 @@ def reprint_win(window: window):
     window.resize(max_y, max_x)
 
 def lay(content: window, window: window, coffset_y = 0, coffset_x = 0):
-    '''Overlays as much content as can fit in a window (call curses.doupdate manually)'''
+    '''Overlays as much content as can fit in a window (only calls noutrefresh on content)'''
     beg_y, beg_x = window.getbegyx()
     max_y, max_x = window.getmaxyx()
     content.noutrefresh(coffset_y, coffset_x, beg_y, beg_x, beg_y + max_y - 1, beg_x + max_x - 1)
@@ -67,17 +58,15 @@ def wread(window: window, arg_1: str | int, arg_2: int = 1, message: str = "", s
 
 def cover(window: window, veil: Pad = None):
     '''
-    cover/hide a window via a temporary pad -- "veil" (calls curses.doupdate)\n
+    cover/hide a window via a temporary pad -- "veil"\n
     cover is destructive and will clear and deallocate veil.'''
     if veil is None:
         veil = curses.newpad(*window.getmaxyx())
     lay(veil, window)
     veil.clear()
     del veil
-    curses.doupdate()
 
 def uncover(window: window):
-    '''uncover/unhide a window (calls curses.doupdate)'''
+    '''uncover/unhide a window'''
     reprint_win(window)
     window.noutrefresh()
-    curses.doupdate()
