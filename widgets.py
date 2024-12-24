@@ -57,16 +57,14 @@ class Console(_CurseWidget):
 class TextBox(_CurseWidget):
     def __init__(self, nline, ncols, beg_y, beg_x):
         self.border = curses.newwin(nline, ncols, beg_y, beg_x)
-        self._self = curses.newwin(nline - 2, ncols - 2, beg_y + 1, beg_x + 1)
+        self._self = self.border.subwin(nline - 2, ncols - 2, beg_y + 1, beg_x + 1)
         self.message = ""
         self.message_buffer = []
         self.submission = Event()
     
     def noutrefresh(self):
         self.border.box()
-        reprint_win(self._self)
         self.border.noutrefresh()
-        self._self.noutrefresh()
 
     def refresh(self):
         self.noutrefresh()
@@ -118,20 +116,28 @@ class TextBox(_CurseWidget):
 class Panel(_CurseWidget):
     def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, outline = False):
         self.outline = outline
-        if outline:
+        self.overlay = None
+        if self.outline:
             self.border = curses.newwin(nline, ncols, beg_y, beg_x)
-            self._self = curses.newwin(nline - 2, ncols - 2, beg_y + 1, beg_x + 1)
+            self._self = self.border.subwin(nline - 2, ncols - 2, beg_y + 1, beg_x + 1)
         else:
             self._self = curses.newwin(nline, ncols, beg_y, beg_x)
         self.visible = True
-        self.overlay = None
+    
+    def refresh_border(self):
+        self.border.box()
+        self.border.noutrefresh()
 
     def noutrefresh(self):
-        if self.outline:
-            self.border.box()
-            reprint_win(self._self)
-            self.border.noutrefresh()
-        self._self.noutrefresh()
+        if self.overlay:
+            if self.outline:
+                self.refresh_border()
+            lay(self.overlay, self._self)
+        else:
+            if self.outline:
+                self.refresh_border()
+            else:
+                self._self.noutrefresh()
 
     def refresh(self):
         self.noutrefresh()
@@ -155,17 +161,21 @@ class Panel(_CurseWidget):
         '''Display any content in panel, or overlay if present'''
         self.visible = True
         if self.outline:
-            self.border.box()
-            self.border.noutrefresh()
-        uncover(self._self)
+            self.refresh_border()
         if self.overlay:
             lay(self.overlay, self._self)
+        else:
+            uncover(self._self)
+        curses.doupdate()
+
         
     def hide(self):
         '''
         Hide any content in panel, or overlay if present\n
         Content in Panel and overlay are preserved'''
         self.visible = False
-        self.noutrefresh()
+        if self.outline:
+            self.refresh_border()
         cover(self._self)
+        curses.doupdate()
         
