@@ -11,11 +11,15 @@ class _CurseWidget:
     def __getattr__(self, name):
         return getattr(self._self, name)
 
-class Console(_CurseWidget):
-    def __init__(self, parent: window, multiplier = 2):
+class FreeWindow(_CurseWidget):
+    def __init__(self, parent: window, *, multiplier = 1, height = 0, width = 0):
         self.parent = parent
         self.reset_offset()
-        height, width = parent.getmaxyx()
+        temph, tempw = parent.getmaxyx()
+        if not height:
+            height = temph
+        if not width:
+            width = tempw
         self._self: window = curses.newpad(height*multiplier, width*multiplier)
 
     def refresh(self):
@@ -44,15 +48,54 @@ class Console(_CurseWidget):
     def get_offset(self):
         return self.cur_y, self.cur_x
 
-    def out(self, text: str):
-        '''Addstr to Console and updates the screen'''
-        self._self.addstr(text)
+    def out(self, text: str, end = '\n'):
+        '''print to Console and update the screen'''
+        self._self.addstr(text + end)
         self.refresh()
+    
+    def addstr(self, *args, **kwargs):
+        raise Exception("WinElement should call .out(...), not addstr(...).")
 
     def cls(self):
         '''Clear the Console and update the screen'''
         self._self.clear()
         cover(self.parent)
+
+class Page(FreeWindow):
+    def __init__(self, parent, *, multiplier=1, height=0, width=0):
+        self.h_dif, self.w_dif = -1, -1
+        super().__init__(parent, multiplier=multiplier, height=height, width=width)
+
+    def shift(self, dir: Dir, unit: int = 1):
+        '''Shift the console in "dir" directiion "unit" units.'''
+        match (dir):
+            case Dir.UP:
+                self.cur_y += unit if self.cur_y + unit <= self.h_dif else 0
+            case Dir.DOWN: 
+                self.cur_y -= unit if self.cur_y - unit >= 0 else 0
+            case Dir.LEFT:
+                self.cur_x += unit if self.cur_x + unit <= self.w_dif else 0
+            case Dir.RIGHT:
+                self.cur_x -= unit if self.cur_x - unit >= 0 else 0
+
+    def out(self, text: str, end = '\n'):
+        '''print to Console, update the screen, and update shift bounds'''
+        super().out(text, end)
+        self.h_dif, self.w_dif = self.get_hw_difference()
+    
+    def get_hw_difference(self):
+        height, width = self._self.getmaxyx()
+        par_h, par_w = self.parent.getmaxyx()
+        last_x = - 1
+        for row in range(height):
+            line = self._self.instr(row, 0, width).decode()
+            line_len = len(line)
+            if line.rstrip():
+                if last_x < line_len:
+                    last_x = line_len
+                last_y = row
+        return (last_y - par_h + 1, last_x - par_w - 2)
+        
 
 class TextBox(_CurseWidget):
     def __init__(self, nline, ncols, beg_y, beg_x):
@@ -91,7 +134,7 @@ class TextBox(_CurseWidget):
             self._self.addstr(word_len * ' ') # covers the existing word
             self._self.move(0, index)
             self.message_buffer = self.message_buffer[:index]
-        elif is_printable(key) and len(self.message_buffer) < self._self.getmaxyx()[1] - 1:
+        elif key.isprintable() and len(self.message_buffer) < self._self.getmaxyx()[1] - 1:
                 self._self.addch(key)
                 self.message_buffer.append(key)
         self.refresh()
@@ -168,7 +211,6 @@ class Panel(_CurseWidget):
             uncover(self._self)
         curses.doupdate()
 
-        
     def hide(self):
         '''
         Hide any content in panel, or overlay if present\n

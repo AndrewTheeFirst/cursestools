@@ -15,10 +15,6 @@ def draw_button(beg_y: int, beg_x: int, height: int, width: int, window: window,
     start_y = beg_y + (height - 1) // 2
     window.addstr(start_y, start_x, text)
 
-def is_printable(char: ChType):
-    '''Returns False for Chars whose ascii values are not within 32 and 126'''
-    return (len(char) == 1) and (32 <= ord(char)) and (ord(char) <= 126)
-
 def reprint_win(window: window):
     '''Useful for overlaying any temporary pad'''
     max_y, max_x = window.getmaxyx()
