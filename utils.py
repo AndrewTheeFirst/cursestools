@@ -4,6 +4,14 @@ from .consts import ChType, Pad
 from time import sleep
 from curses.textpad import rectangle
 
+def center(window: window, text: str):
+    '''Get (y, x) offset in window to center text.'''
+    lines = 1 + text.count('\n')
+    beg_y, beg_x = window.getbegyx()
+    height, width = window.getmaxyx()
+    text_len = len(text)
+    return (beg_y + (height - lines) // 2, beg_x + (width - text_len) // 2)
+
 def draw_box(beg_y: int, beg_x: int, height: int, width: int, window: window):
     '''Draw a box at specified at (beg_y, beg_x) with specified (height, width)'''
     rectangle(window, beg_y, beg_x, beg_y + height - 1, beg_x + width - 1)

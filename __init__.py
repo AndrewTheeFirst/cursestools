@@ -1,7 +1,7 @@
 from .widgets import Panel, FreeWindow, TextBox, Page
 from .utils import \
     draw_box, draw_button,\
-        wprint, wread,\
+        center, wprint, wread,\
             cover, uncover,\
                 reprint_win, lay
 from .consts import Dir,\

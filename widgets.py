@@ -70,13 +70,13 @@ class Page(FreeWindow):
         '''Shift the console in "dir" directiion "unit" units.'''
         match (dir):
             case Dir.UP:
-                self.cur_y += unit if self.cur_y + unit <= self.h_dif else 0
+                self.cur_y = self.cur_y + unit if self.cur_y + unit <= self.h_dif else self.h_dif
             case Dir.DOWN: 
-                self.cur_y -= unit if self.cur_y - unit >= 0 else 0
+                self.cur_y = self.cur_y - unit if self.cur_y - unit >= 0 else 0
             case Dir.LEFT:
-                self.cur_x += unit if self.cur_x + unit <= self.w_dif else 0
+                self.cur_x = self.cur_x + unit if self.cur_x + unit <= self.w_dif else self.w_dif
             case Dir.RIGHT:
-                self.cur_x -= unit if self.cur_x - unit >= 0 else 0
+                self.cur_x = self.cur_x - unit if self.cur_x - unit >= 0 else 0
 
     def out(self, text: str, end = '\n'):
         '''print to Console, update the screen, and update shift bounds'''
@@ -85,16 +85,16 @@ class Page(FreeWindow):
     
     def get_hw_difference(self):
         height, width = self._self.getmaxyx()
-        par_h, par_w = self.parent.getmaxyx()
-        last_x = - 1
-        for row in range(height):
-            line = self._self.instr(row, 0, width).decode()
-            line_len = len(line)
-            if line.rstrip():
-                if last_x < line_len:
-                    last_x = line_len
-                last_y = row
-        return (last_y - par_h + 1, last_x - par_w - 2)
+        parent_height, parent_width = self.parent.getmaxyx()
+        max_content_width = - 1
+        for line in range(height):
+            line_content = self._self.instr(line, 0, width).decode()
+            content_width = len(line_content)
+            if line_content.rstrip():
+                if max_content_width < content_width:
+                    max_content_width = content_width
+                max_content_height = line
+        return (max_content_height - parent_height + 1, max_content_width - parent_width - 2)
         
 
 class TextBox(_CurseWidget):
