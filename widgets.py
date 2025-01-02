@@ -3,6 +3,7 @@ from curses import window
 from .utils import *
 from .consts import *
 from threading import Event
+from typing import Literal
 
 class _CurseWidget:
     def __init__(self):
@@ -53,8 +54,8 @@ class FreeWindow(_CurseWidget):
         self._self.addstr(text + end)
         self.refresh()
     
-    def addstr(self, *args, **kwargs):
-        raise Exception("WinElement should call .out(...), not addstr(...).")
+    # def addstr(self, *args, **kwargs):
+    #     raise Exception("WinElement should call .out(...), not addstr(...).")
 
     def cls(self):
         '''Clear the Console and update the screen'''
@@ -96,8 +97,7 @@ class Page(FreeWindow):
                 max_content_height = line
         return (max_content_height - parent_height + 1, max_content_width - parent_width - 2)
         
-
-class TextBox(_CurseWidget):
+class Terminal(_CurseWidget):
     def __init__(self, nline, ncols, beg_y, beg_x):
         self.border = curses.newwin(nline, ncols, beg_y, beg_x)
         self._self = self.border.subwin(nline - 2, ncols - 2, beg_y + 1, beg_x + 1)
@@ -156,8 +156,104 @@ class TextBox(_CurseWidget):
         '''Return text currently stored in textbox'''
         return "".join(self.message_buffer)
 
+class TextBox:
+    def __init__(self, nlines: int, ncols: int, beg_y: int, beg_x: int,\
+                        text: str = "", align = Align.LEFT):
+        self.nlines = nlines
+        self.ncols = ncols
+        self.width = ncols - 2
+        self.frame = curses.newwin(nlines, ncols, beg_y, beg_x)
+        self._self = self.frame.derwin(nlines, ncols - 2, 0, 1)
+        self.align = align
+        self.text = text
+
+    def set_text(self, text: str):
+        self.text = text
+
+    def set_align(self, align: Align):
+        self.align = align
+
+    def noutprint(self):
+        self.clear()
+        self.format()
+        self.frame.vline(0, 0, curses.ACS_VLINE, self.nlines)
+        self.frame.vline(0, self.ncols - 1, curses.ACS_VLINE, self.nlines)
+        self.frame.noutrefresh()
+        self._self.noutrefresh()
+    
+    def print(self):
+        self.noutprint()
+        curses.doupdate()
+
+    def clear(self):
+        self.frame.clear()
+
+    def read(self, mode: Literal["WORD"] | Literal["CHAR"] = "CHAR", timeout: float = 0.05):
+        if mode == "WORD":
+            builder = []
+            itera = self.text.split()
+        elif mode == "CHAR":
+            builder = ""
+            itera = self.text
+        else:
+            raise Exception("Invalid Mode")
+        
+        for block in itera:
+            if mode == "WORD":
+                builder.append(block)
+                text = " ".join(builder)
+                self.set_text(text)
+            if mode == "CHAR":
+                builder += block
+                self.set_text(builder)
+            self.print()
+            sleep(timeout)
+
+    def format(self):
+        current_line_length = 0
+        current_line = []
+        y = 0
+        for word in self.text.split():
+            line = []
+            word_length = len(word)
+            if current_line_length + 1 + word_length > self.width:
+                line = " ".join(current_line)
+                self.put(y, line)
+                current_line = [word]
+                current_line_length = word_length
+                y += 1
+            else:
+                current_line.append(word)
+                current_line_length += 1 + word_length
+        if current_line:
+            line = " ".join(current_line)
+            self.put(y, line)
+    
+    def put(self, y, line):
+        # writing in bottom left corner will automatically wrap to next line
+        # which may be out of bounds causing exception.
+        # we will just except it here and pass
+        if y > self.nlines:
+            raise curses.error
+        try:
+            self._self.addstr(y, self.get_offset(line, self.align), line)
+        except curses.error:
+            pass 
+
+    
+    def get_offset(self, line: str, alignment: Align):
+        length_line = len(line)
+        match (alignment):
+            case Align.RIGHT:
+                return (self.width - length_line)
+            case Align.CENTER:
+                return (self.width - length_line) // 2
+            case Align.LEFT:
+                ...
+        return 0
+        
 class Panel(_CurseWidget):
-    def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, outline = False):
+    def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, outline: bool = False):
         self.outline = outline
         self.overlay = None
         if self.outline:
@@ -175,11 +271,14 @@ class Panel(_CurseWidget):
         if self.overlay:
             if self.outline:
                 self.refresh_border()
+            self.hide() ### CHANGED
             lay(self.overlay, self._self)
         else:
             if self.outline:
                 self.refresh_border()
+                self.show() ### CHANGED
             else:
+                self.show() ### CHANGED
                 self._self.noutrefresh()
 
     def refresh(self):
@@ -220,4 +319,3 @@ class Panel(_CurseWidget):
             self.refresh_border()
         cover(self._self)
         curses.doupdate()
-        

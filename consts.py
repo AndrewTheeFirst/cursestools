@@ -7,6 +7,12 @@ BKSP = '\x08'
 ENTER = '\n'
 CTRL_BKSP = '\x17'
 
+class Align(Enum):
+    LEFT = 0
+    CENTER = 1
+    JUSTIFY = 2
+    RIGHT = 3
+
 class Dir(Enum):
     UP = 0
     DOWN = 1
