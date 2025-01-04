@@ -1,4 +1,4 @@
-from .widgets import Panel, FreeWindow, Terminal, Page, TextBox
+from .widgets import Panel, Terminal, Page, TextBox, Canvas
 from .utils import \
     draw_box, draw_button,\
         center, wprint, wread,\

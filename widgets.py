@@ -12,7 +12,7 @@ class _CurseWidget:
     def __getattr__(self, name):
         return getattr(self._self, name)
 
-class FreeWindow(_CurseWidget):
+class Page(_CurseWidget):
     def __init__(self, parent: window, *, multiplier = 1, height = 0, width = 0):
         self.parent = parent
         self.reset_offset()
@@ -53,49 +53,11 @@ class FreeWindow(_CurseWidget):
         '''print to Console and update the screen'''
         self._self.addstr(text + end)
         self.refresh()
-    
-    # def addstr(self, *args, **kwargs):
-    #     raise Exception("WinElement should call .out(...), not addstr(...).")
 
     def cls(self):
         '''Clear the Console and update the screen'''
         self._self.clear()
         cover(self.parent)
-
-class Page(FreeWindow):
-    def __init__(self, parent, *, multiplier=1, height=0, width=0):
-        self.h_dif, self.w_dif = -1, -1
-        super().__init__(parent, multiplier=multiplier, height=height, width=width)
-
-    def shift(self, dir: Dir, unit: int = 1):
-        '''Shift the console in "dir" directiion "unit" units.'''
-        match (dir):
-            case Dir.UP:
-                self.cur_y = self.cur_y + unit if self.cur_y + unit <= self.h_dif else self.h_dif
-            case Dir.DOWN: 
-                self.cur_y = self.cur_y - unit if self.cur_y - unit >= 0 else 0
-            case Dir.LEFT:
-                self.cur_x = self.cur_x + unit if self.cur_x + unit <= self.w_dif else self.w_dif
-            case Dir.RIGHT:
-                self.cur_x = self.cur_x - unit if self.cur_x - unit >= 0 else 0
-
-    def out(self, text: str, end = '\n'):
-        '''print to Console, update the screen, and update shift bounds'''
-        super().out(text, end)
-        self.h_dif, self.w_dif = self.get_hw_difference()
-    
-    def get_hw_difference(self):
-        height, width = self._self.getmaxyx()
-        parent_height, parent_width = self.parent.getmaxyx()
-        max_content_width = - 1
-        for line in range(height):
-            line_content = self._self.instr(line, 0, width).decode()
-            content_width = len(line_content)
-            if line_content.rstrip():
-                if max_content_width < content_width:
-                    max_content_width = content_width
-                max_content_height = line
-        return (max_content_height - parent_height + 1, max_content_width - parent_width - 2)
         
 class Terminal(_CurseWidget):
     def __init__(self, nline, ncols, beg_y, beg_x):
@@ -255,7 +217,6 @@ class TextBox:
 class Panel(_CurseWidget):
     def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, outline: bool = False):
         self.outline = outline
-        self.overlay = None
         if self.outline:
             self.border = curses.newwin(nline, ncols, beg_y, beg_x)
             self._self = self.border.subwin(nline - 2, ncols - 2, beg_y + 1, beg_x + 1)
@@ -268,22 +229,50 @@ class Panel(_CurseWidget):
         self.border.noutrefresh()
 
     def noutrefresh(self):
-        if self.overlay:
-            if self.outline:
-                self.refresh_border()
-            self.hide() ### CHANGED
-            lay(self.overlay, self._self)
+        if self.outline:
+            self.refresh_border()
         else:
-            if self.outline:
-                self.refresh_border()
-                self.show() ### CHANGED
-            else:
-                self.show() ### CHANGED
-                self._self.noutrefresh()
+            self._self.noutrefresh()
 
     def refresh(self):
         self.noutrefresh()
         curses.doupdate()
+    
+    def toggle(self):
+        '''toggle Panel visibility'''
+        self.hide() if self.visible else self.show()
+    
+    def show(self):
+        '''Display any content in panel, or overlay if present'''
+        self.visible = True
+        if self.outline:
+            self.refresh_border()
+        uncover(self._self)
+        curses.doupdate()
+
+    def hide(self):
+        '''
+        Hide any content in panel, or overlay if present\n
+        Content in Panel and overlay are preserved'''
+        self.visible = False
+        if self.outline:
+            self.refresh_border()
+        cover(self._self)
+        curses.doupdate()
+
+class Canvas(Panel):
+    '''
+    Panel-like window whose purpose is to be overlaid by Pad-like windows.\n
+    Canvas should not be written to, but will not stop you in the case that you do.'''
+    def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, *, outline: bool = False, overlay = None):
+        self.overlay = overlay
+        super().__init__(nline, ncols, beg_y, beg_x, outline)
+
+    def noutrefresh(self):
+        if self.overlay:
+            if self.outline:
+                self.refresh_border()
+            lay(self.overlay, self._self)
     
     def set_overlay(self, overlay: Pad):
         '''
@@ -295,10 +284,6 @@ class Panel(_CurseWidget):
         '''Removes overlay, and therefore, will not show overlay on .show()'''
         self.overlay = None
     
-    def toggle(self):
-        '''toggle Panel visibility'''
-        self.hide() if self.visible else self.show()
-    
     def show(self):
         '''Display any content in panel, or overlay if present'''
         self.visible = True
@@ -306,16 +291,4 @@ class Panel(_CurseWidget):
             self.refresh_border()
         if self.overlay:
             lay(self.overlay, self._self)
-        else:
-            uncover(self._self)
-        curses.doupdate()
-
-    def hide(self):
-        '''
-        Hide any content in panel, or overlay if present\n
-        Content in Panel and overlay are preserved'''
-        self.visible = False
-        if self.outline:
-            self.refresh_border()
-        cover(self._self)
         curses.doupdate()
