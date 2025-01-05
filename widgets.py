@@ -119,38 +119,84 @@ class Terminal(_CurseWidget):
         return "".join(self.message_buffer)
 
 class TextBox:
-    def __init__(self, nlines: int, ncols: int, beg_y: int, beg_x: int,\
-                        text: str = "", align = Align.LEFT):
-        self.nlines = nlines
-        self.ncols = ncols
-        self.width = ncols - 2
-        self.frame = curses.newwin(nlines, ncols, beg_y, beg_x)
-        self._self = self.frame.derwin(nlines, ncols - 2, 0, 1)
-        self.align = align
-        self.text = text
+    def __init__(self, nlines: int, ncols: int, text: str = "", \
+                    alignment: Align = Align.LEFT, *, v_centered: bool = False):
+        self.set_size(nlines, ncols)
+        self.set_text(text)
+        self.set_alignment(alignment, v_centered=v_centered)
 
     def set_text(self, text: str):
         self.text = text
 
-    def set_align(self, align: Align):
-        self.align = align
+    def set_alignment(self, align: Align = None, *, v_centered: bool | None = None):
+        if not v_centered is None:
+            self.v_centered = v_centered
+        if not align is None:
+            self.alignment = align
 
-    def noutprint(self):
-        self.clear()
-        self.format()
-        self.frame.vline(0, 0, curses.ACS_VLINE, self.nlines)
-        self.frame.vline(0, self.ncols - 1, curses.ACS_VLINE, self.nlines)
-        self.frame.noutrefresh()
-        self._self.noutrefresh()
-    
-    def print(self):
-        self.noutprint()
-        curses.doupdate()
+    def set_size(self, height: int, width: int):
+            self.nlines = height
+            self.ncols = width
+            self.width = width - 2
 
-    def clear(self):
-        self.frame.clear()
+    def print_textbox(self, parent: window, beg_y: int, beg_x: int):
+        self.verify_nlines()
+        parent.vline(beg_y, beg_x, curses.ACS_VLINE, self.nlines)
+        parent.vline(beg_y, beg_x + self.ncols - 1, curses.ACS_VLINE, self.nlines)
+        if self.v_centered:
+            beg_y = beg_y + (self.nlines - self.min_nlines) // 2
+        self.write(parent, beg_y, beg_x)
 
-    def read(self, mode: Literal["WORD"] | Literal["CHAR"] = "CHAR", timeout: float = 0.05):
+    def read_textbox(self, parent: window, beg_y: int, beg_x: int,\
+                     mode: Literal["WORD"] | Literal["CHAR"] = "CHAR", timeout: float = 0.05):
+        self.verify_nlines()
+        parent.vline(beg_y, beg_x, curses.ACS_VLINE, self.nlines)
+        parent.vline(beg_y, beg_x + self.ncols - 1, curses.ACS_VLINE, self.nlines)
+        if self.v_centered:
+            beg_y = beg_y + (self.nlines - self.min_nlines) // 2
+        self.read(parent, beg_y, beg_x, mode, timeout)
+
+    def verify_nlines(self):
+        self.min_nlines = self.get_min_nlines()
+        if self.nlines < self.min_nlines:
+            raise Exception(f"Textbox MUST have MINIMUM {self.min_nlines} LINES given # COLS")
+
+    def get_min_nlines(self):
+        if len(self.text) == 0:
+            return 0
+        nlines = 1
+        current_length = 0
+        for word in self.text.split():
+            word_length = len(word)
+            if current_length + 1 + word_length > self.width:
+                nlines += 1
+                current_length = word_length
+            else:
+                current_length += 1 + word_length
+        return nlines
+
+    def write(self, parent: window, beg_y: int, beg_x: int):
+            current_line_length = 0
+            current_line = []
+            current_y = beg_y
+
+            for word in self.text.split():
+                word_length = len(word)
+                if current_line_length + 1 + word_length > self.width:
+                    parent.addstr(current_y, beg_x + 1, ' ' * self.width) # CLEARS LINE IN CASE OF LEAKAGE FROM PREV PRINT
+                    self.format(parent, current_y, beg_x + 1, current_line)
+                    current_line = [word]
+                    current_line_length = word_length
+                    current_y += 1
+                else:
+                    current_line.append(word)
+                    current_line_length += 1 + word_length
+
+            if current_line:
+                self.format(parent, current_y, beg_x + 1, current_line)
+
+    def read(self, parent: window, beg_y: int, beg_x: int,\
+                     mode: Literal["WORD"] | Literal["CHAR"] = "CHAR", timeout: float = 0.05):
         if mode == "WORD":
             builder = []
             itera = self.text.split()
@@ -158,8 +204,7 @@ class TextBox:
             builder = ""
             itera = self.text
         else:
-            raise Exception("Invalid Mode")
-        
+            raise Exception("Invalid Mode - Valid Chunk Modes: 'CHAR', 'WORD'")
         for block in itera:
             if mode == "WORD":
                 builder.append(block)
@@ -168,52 +213,31 @@ class TextBox:
             if mode == "CHAR":
                 builder += block
                 self.set_text(builder)
-            self.print()
+            self.write(parent, beg_y, beg_x)
+            parent.refresh()
             sleep(timeout)
 
-    def format(self):
-        current_line_length = 0
-        current_line = []
-        y = 0
-        for word in self.text.split():
-            line = []
-            word_length = len(word)
-            if current_line_length + 1 + word_length > self.width:
-                line = " ".join(current_line)
-                self.put(y, line)
-                current_line = [word]
-                current_line_length = word_length
-                y += 1
-            else:
-                current_line.append(word)
-                current_line_length += 1 + word_length
-        if current_line:
-            line = " ".join(current_line)
-            self.put(y, line)
-    
-    def put(self, y, line):
+    def format(self, parent: window, y: int, x: int, line: list[str]):
         # writing in bottom left corner will automatically wrap to next line
         # which may be out of bounds causing exception.
         # we will just except it here and pass
-        if y > self.nlines:
-            raise curses.error
         try:
-            self._self.addstr(y, self.get_offset(line, self.align), line)
+            text = " ".join(line)
+            line_length = len(text)
+            parent.addstr(y, x + self.get_offset(line_length), text)
         except curses.error:
             pass 
 
-    
-    def get_offset(self, line: str, alignment: Align):
-        length_line = len(line)
-        match (alignment):
+    def get_offset(self, line_length: int):
+        match (self.alignment):
             case Align.RIGHT:
-                return (self.width - length_line)
+                return (self.width - line_length)
             case Align.CENTER:
-                return (self.width - length_line) // 2
+                return (self.width - line_length) // 2
             case Align.LEFT:
                 ...
         return 0
-        
+      
 class Panel(_CurseWidget):
     def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, outline: bool = False):
         self.outline = outline
