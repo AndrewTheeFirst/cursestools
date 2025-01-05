@@ -8,10 +8,10 @@ ENTER = '\n'
 CTRL_BKSP = '\x17'
 
 class Align(Enum):
-    LEFT = 0
-    CENTER = 1
-    JUSTIFY = 2
-    RIGHT = 3
+    LEFT = 1
+    RIGHT = 2
+    CENTER = 3
+    JUSTIFY = 4 # NOT IMPLEMENTED
 
 class Dir(Enum):
     UP = 0
@@ -19,5 +19,5 @@ class Dir(Enum):
     LEFT = 2
     RIGHT = 3
 
-Pad = window
+PadType: TypeAlias = window
 ChType: TypeAlias = str | bytes | int
