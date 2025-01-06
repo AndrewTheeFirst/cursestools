@@ -6,6 +6,7 @@ from threading import Event
 from typing import Literal
 
 class _CurseWidget:
+    '''Emulate inheritance from curses.window which has @final decorator.'''
     def __init__(self):
         self._self: window = ...
 
@@ -13,41 +14,53 @@ class _CurseWidget:
         return getattr(self._self, name)
 
 class Page(_CurseWidget):
+    '''A Pad-Like widget to abstract scrolling content that cannot all fit in the window at once.'''
     def __init__(self, parent: window, *, multiplier = 1, height = 0, width = 0):
+        '''
+        Initialize a Page object to be "laid" onto a parent window.\n
+        If a height or width is set, the multiplier will be ignored for that dimension.'''
         self.parent = parent
         self.reset_offset()
-        temph, tempw = parent.getmaxyx()
+        par_h, par_w = parent.getmaxyx()
         if not height:
-            height = temph
+            height = par_h * multiplier
         if not width:
-            width = tempw
-        self._self: window = curses.newpad(height*multiplier, width*multiplier)
+            width = par_w * multiplier
+        self._self: window = curses.newpad(height, width)
+        self.max_v_shift = height - par_h
+        self.max_h_shift = width - par_w
 
     def refresh(self):
         '''Make any update to the Console on the parent visible if not already.'''
-        lay(self._self, self.parent, self.cur_y, self.cur_x)
+        lay(self._self, self.parent, self.v_shift, self.h_shift)
         curses.doupdate()
     
     def shift(self, dir: Dir, unit: int = 1):
         '''Shift the console in "dir" directiion "unit" units.'''
         match (dir):
             case Dir.UP:
-                max_y = self._self.getmaxyx()[0] - 1
-                self.cur_y += unit if self.cur_y + unit <= max_y else 0
+                self.v_shift += unit
+                if self.v_shift > self.max_v_shift:
+                    self.v_shift = self.max_v_shift
             case Dir.DOWN: 
-                self.cur_y -= unit if self.cur_y - unit >= 0 else 0
+                self.v_shift -= unit
+                if self.v_shift < 0:
+                    self.v_shift = 0
             case Dir.LEFT:
-                max_x = self._self.getmaxyx()[1] - 1
-                self.cur_x += unit if self.cur_x + unit <= max_x else 0
+                self.h_shift += unit
+                if self.h_shift > self.max_h_shift:
+                    self.h_shift = self.max_h_shift
             case Dir.RIGHT:
-                self.cur_x -= unit if self.cur_x - unit >= 0 else 0
+                self.h_shift -= unit
+                if self.h_shift < 0:
+                    self.h_shift = 0
     
     def reset_offset(self):
         '''Bring Console back to starting location on parent'''
-        self.cur_y, self.cur_x = 0, 0
+        self.v_shift, self.h_shift = 0, 0
 
     def get_offset(self):
-        return self.cur_y, self.cur_x
+        return self.v_shift, self.h_shift
 
     def out(self, text: str, end = '\n'):
         '''print to Console and update the screen'''
@@ -60,6 +73,7 @@ class Page(_CurseWidget):
         cover(self.parent)
         
 class Terminal(_CurseWidget):
+    '''A Terminal to display, process, and submit keystrokes.'''
     def __init__(self, nline, ncols, beg_y, beg_x):
         self.border = curses.newwin(nline, ncols, beg_y, beg_x)
         self._self = self.border.subwin(nline - 2, ncols - 2, beg_y + 1, beg_x + 1)
@@ -119,8 +133,9 @@ class Terminal(_CurseWidget):
         return "".join(self.message_buffer)
 
 class TextBox:
+    '''A class to automatically format text in a window.'''
     def __init__(self, nlines: int, ncols: int, text: str = "", \
-                    alignment: Align = Align.LEFT, *, v_centered: bool = False):
+                    *, alignment: Align = Align.LEFT, v_centered: bool = False):
         self.set_size(nlines, ncols)
         self.set_text(text)
         self.set_alignment(alignment, v_centered=v_centered)
@@ -239,6 +254,7 @@ class TextBox:
         return 0
       
 class Panel(_CurseWidget):
+    '''An extenstion to curses.window object, whose visibility may be toggled.'''
     def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, outline: bool = False):
         self.outline = outline
         if self.outline:
@@ -298,7 +314,7 @@ class Canvas(Panel):
                 self.refresh_border()
             lay(self.overlay, self._self)
     
-    def set_overlay(self, overlay: Pad):
+    def set_overlay(self, overlay: PadType):
         '''
         Set an overlay to be shown and hidden with the panel.\n
         Setting an overlay does not destroy what is stored in the panel.'''
