@@ -5,7 +5,9 @@ from enum import Enum
 ESC = '\x1b'
 BKSP = '\x08'
 ENTER = '\n'
+TAB = '\t'
 CTRL_BKSP = '\x17'
+CTRL_SHFT_BKSP = '\x7f'
 
 class Align(Enum):
     LEFT = 1

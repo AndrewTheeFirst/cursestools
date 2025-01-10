@@ -3,7 +3,7 @@ from curses import window
 from .utils import *
 from .consts import *
 from threading import Event
-from typing import Literal
+from typing import Literal, Callable
 
 class _CurseWidget:
     '''Emulate inheritance from curses.window which has @final decorator.'''
@@ -55,12 +55,21 @@ class Page(_CurseWidget):
                 if self.h_shift < 0:
                     self.h_shift = 0
     
+    def get_parent_window(self) -> _CurseWidget | window:
+        return self.parent
+
     def reset_offset(self):
         '''Bring Console back to starting location on parent'''
         self.v_shift, self.h_shift = 0, 0
 
     def get_offset(self):
         return self.v_shift, self.h_shift
+
+    def set_offset(self, *, v_shift: int = -1, h_shift: int = -1):
+        if 0 < v_shift < self.max_v_shift:
+            self.v_shift = v_shift
+        if 0 < h_shift < self.max_h_shift:
+            self.h_shift = h_shift
 
     def out(self, text: str, end = '\n'):
         '''print to Console and update the screen'''
@@ -74,63 +83,100 @@ class Page(_CurseWidget):
         
 class Terminal(_CurseWidget):
     '''A Terminal to display, process, and submit keystrokes.'''
-    def __init__(self, nline, ncols, beg_y, beg_x):
-        self.border = curses.newwin(nline, ncols, beg_y, beg_x)
-        self._self = self.border.subwin(nline - 2, ncols - 2, beg_y + 1, beg_x + 1)
-        self.message = ""
-        self.message_buffer = []
-        self.submission = Event()
+    min_width = 3 + len("EDIT=FALSE")
+    min_height = 3
     
+    def __init__(self, nlines, ncols, beg_y, beg_x, default: str = "> "):
+        if (nlines < Terminal.min_height) or (ncols < Terminal.min_width):
+            raise Exception(f"TERMINAL MIN <LINES, COLS> IS <{Terminal.min_height}, {Terminal.min_width}>")
+        self.border = curses.newwin(nlines, ncols, beg_y, beg_x)
+        self._self = curses.newwin(nlines - 2, ncols - 2, beg_y + 1, beg_x + 1)
+        self.default = default
+        self.max_chars = (ncols - 2) * (nlines - 2) - len(self.default)
+        self.message = ""
+        self.last_print = ""
+        self.submitted = False
+        self.editing = True
+        self._print()
+        self.noutrefresh()
+        self.binds: dict[str, Callable[[], None]] = {BKSP: self.delete,
+                                                     CTRL_BKSP: self.delete_last_word,
+                                                     CTRL_SHFT_BKSP: self.delete_all,
+                                                     ENTER: self.submit}
+
     def noutrefresh(self):
         self.border.box()
+        self.border.addstr(0, 2, f"EDIT={repr(self.editing).upper()}", curses.A_STANDOUT)
+        self._print()
         self.border.noutrefresh()
+        self._self.noutrefresh()
 
     def refresh(self):
         self.noutrefresh()
         curses.doupdate()
 
-    def proc_key(self, key: ChType):
-        '''
-        Process a keystroke.\n
-        Supports Enter, Backspace, Ctrl-Backspace, and Printable Chars.\n
-        Use cursestools.consts for most reliable results.'''
-        if key == ENTER:
-            self.submission.set()
-            self.message = self.peek_text()
-            self.clear_text()
-        elif key == BKSP and len(self.message_buffer) > 0:
-            self._self.delch(0, len(self.message_buffer) - 1)
-            self.message_buffer.pop()
-        elif key == CTRL_BKSP:
-            buffer_length = len(self.message_buffer)
-            index = 0 if not ' ' in self.message_buffer else\
-                    buffer_length - self.message_buffer[::-1].index(' ') - 1
-            word_len = buffer_length - index
-            self._self.move(0, index)
-            self._self.addstr(word_len * ' ') # covers the existing word
-            self._self.move(0, index)
-            self.message_buffer = self.message_buffer[:index]
-        elif key.isprintable() and len(self.message_buffer) < self._self.getmaxyx()[1] - 1:
-                self._self.addch(key)
-                self.message_buffer.append(key)
-        self.refresh()
+    def submit(self):
+        self.submitted = True
     
-    def clear_text(self):
-        '''Clears the message buffer'''
-        self.message_buffer = []
-        self._self.deleteln()
-        self._self.move(0, 0)
+    def toggle_mode(self):
+        self.editing = not self.editing
+    
+    def delete(self):
+        if len(self.message) > 0:
+            self.message = self.message[:-1]
+            self.print()
+    
+    def delete_all(self):
+        self.message = ''
+        self.print()
+
+    def delete_last_word(self):
+        words = self.message.split()
+        if words:
+            words.pop()
+            self.message = ' '.join(words) + ' '
+            if self.message == ' ':
+                self.message = ''
+        self.print()
+
+    def print(self, key: str = ""):
+        if key and key.isprintable() and len(self.message) < self.max_chars:
+            self.message += key
+        if self.message != self.last_print:
+            self._self.clear()
+            self._print()
+            self.last_print = self.message
+            curses.doupdate()
+    
+    def _print(self):
+        self._self.clear()
+        if len(self.message) == self.max_chars:
+            # prevents OOB error due to curses' automatic wrap flag
+            try:
+                self._self.addstr(0, 0, self.default + self.message)
+            except curses.error:
+                pass
+        else:
+            self._self.addstr(0, 0, self.default + self.message)
+    
+    def proc_key(self, key: ChType):
+        if key == ESC:
+            self.toggle_mode()
+            self.refresh()
+        elif self.editing:
+                self.binds.get(key, lambda: self.print(key))()
 
     def get_text(self):
         '''Waits for submission event then returns whats stored in the message field'''
-        self.submission.clear() 
-        self.submission.wait()
-        self.submission.clear()
-        return self.message
+        if self.submitted:
+            self.submitted = False
+            return self.message
+        else:
+            return ''
 
     def peek_text(self):
         '''Return text currently stored in textbox'''
-        return "".join(self.message_buffer)
+        return self.message
 
 class TextBox:
     '''A class to automatically format text in a window.'''
@@ -309,9 +355,9 @@ class Canvas(Panel):
         super().__init__(nline, ncols, beg_y, beg_x, outline)
 
     def noutrefresh(self):
+        if self.outline:
+            self.refresh_border()
         if self.overlay:
-            if self.outline:
-                self.refresh_border()
             lay(self.overlay, self._self)
     
     def set_overlay(self, overlay: PadType):
