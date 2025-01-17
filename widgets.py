@@ -2,7 +2,6 @@ import curses
 from curses import window
 from .utils import *
 from .consts import *
-from threading import Event
 from typing import Literal, Callable
 
 class _CurseWidget:
@@ -32,8 +31,12 @@ class Page(_CurseWidget):
 
     def refresh(self):
         '''Make any update to the Console on the parent visible if not already.'''
-        lay(self._self, self.parent, self.v_shift, self.h_shift)
+        self.noutrefresh()
         curses.doupdate()
+
+    def noutrefresh(self):
+        '''Make any update to the Console on the parent visible if not already.'''
+        lay(self._self, self.parent, self.v_shift, self.h_shift)
     
     def shift(self, dir: Dir, unit: int = 1):
         '''Shift the console in "dir" directiion "unit" units.'''
@@ -70,16 +73,9 @@ class Page(_CurseWidget):
             self.v_shift = v_shift
         if 0 < h_shift < self.max_h_shift:
             self.h_shift = h_shift
-
-    def out(self, text: str, end = '\n'):
-        '''print to Console and update the screen'''
-        self._self.addstr(text + end)
-        self.refresh()
-
-    def cls(self):
-        '''Clear the Console and update the screen'''
+    
+    def clear(self):
         self._self.clear()
-        cover(self.parent)
         
 class Terminal(_CurseWidget):
     '''A Terminal to display, process, and submit keystrokes.'''
@@ -97,7 +93,6 @@ class Terminal(_CurseWidget):
         self.last_print = ""
         self.submitted = False
         self.editing = True
-        self._print()
         self.noutrefresh()
         self.binds: dict[str, Callable[[], None]] = {BKSP: self.delete,
                                                      CTRL_BKSP: self.delete_last_word,
@@ -146,7 +141,6 @@ class Terminal(_CurseWidget):
             self._self.clear()
             self._print()
             self.last_print = self.message
-            curses.doupdate()
     
     def _print(self):
         self._self.clear()
@@ -159,14 +153,18 @@ class Terminal(_CurseWidget):
         else:
             self._self.addstr(0, 0, self.default + self.message)
     
-    def proc_key(self, key: ChType):
-        if key == ESC:
+    def proc_key(self, key: ChType) -> ChType:
+        if key == TAB:
             self.toggle_mode()
             self.refresh()
         elif self.editing:
-                self.binds.get(key, lambda: self.print(key))()
+            self.binds.get(key, lambda: self.print(key))()
+        else: # key ignored
+            return key
+        self.refresh()
+        return ''
 
-    def get_text(self):
+    def get_text(self) -> str:
         '''Waits for submission event then returns whats stored in the message field'''
         if self.submitted:
             self.submitted = False
@@ -174,7 +172,7 @@ class Terminal(_CurseWidget):
         else:
             return ''
 
-    def peek_text(self):
+    def peek_text(self) -> str:
         '''Return text currently stored in textbox'''
         return self.message
 
@@ -199,6 +197,9 @@ class TextBox:
             self.nlines = height
             self.ncols = width
             self.width = width - 2
+    
+    def get_size(self):
+        return self.nlines, self.ncols
 
     def print_textbox(self, parent: window, beg_y: int, beg_x: int):
         self.verify_nlines()
