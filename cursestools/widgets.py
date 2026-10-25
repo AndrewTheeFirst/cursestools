@@ -1,8 +1,10 @@
+from __future__ import annotations
 import curses
 from curses import window
 from .utils import *
 from .consts import *
 from typing import Literal, Callable
+from enum import Enum, auto
 
 class _CurseWidget:
     '''Emulate inheritance from curses.window which has @final decorator.'''
@@ -177,129 +179,193 @@ class Terminal(_CurseWidget):
         return self.message
 
 class TextBox:
-    '''A class to automatically format text in a window.'''
-    def __init__(self, nlines: int, ncols: int, text: str = "", \
-                    *, alignment: Align = Align.LEFT, v_centered: bool = False):
-        self.set_size(nlines, ncols)
-        self.set_text(text)
-        self.set_alignment(alignment, v_centered=v_centered)
+    def __init__(self, nlines: int, ncols: int, beg_y: int, beg_x: int, *, outline: bool = False):
+        self.beg_y: int
+        self.beg_x: int
+        self.nlines: int
+        self.ncols: int
+        self._window: window
+        self.outline: bool
+        self.v_centered: bool
+        self.alignment: Align
+        self.get_offset_x: Callable[[int, int], int]
+        self.printing_mode: PrintMode
+        self.delay: float
+        self.pause_multiplier: int
+        
+        self.outline = outline
+        self._window = curses.newwin(nlines, ncols, beg_y, beg_x)
+        self.resize(nlines, ncols)
+        self.mvwin(beg_y, beg_x)
+        self.set_printing_configuration(align=Align.LEFT,
+                                        v_centered=False,
+                                        printing_mode=PrintMode.IMMEDIATE,
+                                        delay=0.1,
+                                        pause_multiplier=2)
 
-    def set_text(self, text: str):
-        self.text = text
+        if self.outline:
+            self.border = curses.newwin(nlines, ncols, beg_y, beg_x)
+            self._self = self.border.subwin(nlines - 2, ncols - 2, beg_y + 1, beg_x + 1)
+        else:
+            self._self = curses.newwin(nlines, ncols, beg_y, beg_x)
 
-    def set_alignment(self, align: Align = None, *, v_centered: bool | None = None):
+    def resize(self, nlines: int, ncols: int) -> None:
+        self.nlines, self.height = nlines, nlines
+        self.ncols, self.width = ncols, ncols
+        if self.outline:
+            self.height = nlines - 2
+            self.width = ncols - 2
+        self._window.resize(nlines, ncols)
+
+    def mvwin(self, y: int, x: int) -> None:
+        self._window.erase()
+        self._window.refresh()
+        self.beg_y, self.beg_x = y, x
+
+        self._window.mvwin(y, x)
+        self._window.border()
+        self._window.refresh()
+
+    def erase(self) -> None:
+        self._window.erase()
+        if self.outline:
+            self._window.border()
+        self._window.refresh()
+
+    def _get_x_offset_center(self, text_len, space_width):
+        border_offset_x = 1 if self.outline else 0
+        return border_offset_x + space_width - text_len
+    
+    def _get_x_offset_right(self, text_len, space_width):
+        border_offset_x = 1 if self.outline else 0
+        return border_offset_x + (space_width - text_len) // 2
+    
+    def _get_x_offset_left(self, text_len, space_width):
+        border_offset_x = 1 if self.outline else 0
+        return border_offset_x
+
+    def set_printing_configuration(self, *, align: Align | None = None, v_centered: bool | None = None,\
+                                   printing_mode: PrintMode | None = None, delay: float | None = None, pause_multiplier: int | None = None) -> None:
         if not v_centered is None:
             self.v_centered = v_centered
         if not align is None:
             self.alignment = align
+        match (self.alignment):
+            case Align.CENTER:
+                self.get_offset_x = self._get_x_offset_center
+            case Align.RIGHT:
+                self.get_offset_x = self._get_x_offset_right
+            case Align.LEFT:
+                self.get_offset_x = self._get_x_offset_left
+        if not printing_mode is None:
+            self.printing_mode = printing_mode
+        if not delay is None:
+            self.delay = delay
+        if not pause_multiplier is None:
+            self.pause_multiplier = pause_multiplier
 
-    def set_size(self, height: int, width: int):
-            self.nlines = height
-            self.ncols = width
-            self.width = width - 2
-    
-    def get_size(self):
-        return self.nlines, self.ncols
-
-    def print_textbox(self, parent: window, beg_y: int, beg_x: int):
-        self.verify_nlines()
-        parent.vline(beg_y, beg_x, curses.ACS_VLINE, self.nlines)
-        parent.vline(beg_y, beg_x + self.ncols - 1, curses.ACS_VLINE, self.nlines)
-        if self.v_centered:
-            beg_y = beg_y + (self.nlines - self.min_nlines) // 2
-        self.write(parent, beg_y, beg_x)
-
-    def read_textbox(self, parent: window, beg_y: int, beg_x: int,\
-                     mode: Literal["WORD"] | Literal["CHAR"] = "CHAR", timeout: float = 0.05):
-        self.verify_nlines()
-        parent.vline(beg_y, beg_x, curses.ACS_VLINE, self.nlines)
-        parent.vline(beg_y, beg_x + self.ncols - 1, curses.ACS_VLINE, self.nlines)
-        if self.v_centered:
-            beg_y = beg_y + (self.nlines - self.min_nlines) // 2
-        self.read(parent, beg_y, beg_x, mode, timeout)
-
-    def verify_nlines(self):
-        self.min_nlines = self.get_min_nlines()
-        if self.nlines < self.min_nlines:
-            raise Exception(f"Textbox MUST have MINIMUM {self.min_nlines} LINES given # COLS")
-
-    def get_min_nlines(self):
-        if len(self.text) == 0:
-            return 0
-        nlines = 1
-        current_length = 0
-        for word in self.text.split():
+    def _get_min_nlines(self, text: str):
+        current_y = 0
+        if self.outline:
+            current_y += 1
+        current_line_length = 0
+        current_line = ""
+        self.erase()
+        for word in text.split():
             word_length = len(word)
-            if current_length + 1 + word_length > self.width:
-                nlines += 1
-                current_length = word_length
-            else:
-                current_length += 1 + word_length
-        return nlines
-
-    def write(self, parent: window, beg_y: int, beg_x: int):
-            current_line_length = 0
-            current_line = []
-            current_y = beg_y
-
-            for word in self.text.split():
-                word_length = len(word)
-                if current_line_length + 1 + word_length > self.width:
-                    parent.addstr(current_y, beg_x + 1, ' ' * self.width) # CLEARS LINE IN CASE OF LEAKAGE FROM PREV PRINT
-                    self.format(parent, current_y, beg_x + 1, current_line)
-                    current_line = [word]
-                    current_line_length = word_length
+            while(word_length > self.width):
+                if current_line_length == 0:
+                    fitting_text = word[:self.width]
+                    word = word[self.width:]
                     current_y += 1
                 else:
-                    current_line.append(word)
-                    current_line_length += 1 + word_length
+                    remaining_space = self.width - word_length
+                    fitting_text = word[:word[remaining_space]]
+                    current_line = current_line + ' '  + fitting_text
+                    word = word[self.width:]
+                    current_y += 1
+                    current_line = ''
+                word_length = len(word)
+            if current_line_length == 0:
+                current_line = word
+                current_line_length = word_length
+                continue
+            prospective_length = current_line_length + 1 + word_length
+            if prospective_length < self.width:
+                current_line = current_line + ' ' + word
+                current_line_length = prospective_length
+            elif prospective_length == self.width:
+                current_line = current_line + ' ' + word
+                current_line = ""
+                current_line_length = 0
+                current_y += 1
+            else:
+                current_line = word
+                current_line_length = word_length
+                current_y += 1
+        return current_y
 
-            if current_line:
-                self.format(parent, current_y, beg_x + 1, current_line)
+    def write(self, text: str) -> None:
+        min_nlines = self._get_min_nlines(text)
+        if self.height < min_nlines:
+            raise Exception(f"Textbox MUST have MINIMUM {min_nlines + 2 if self.outline else min_nlines} LINES given # COLS")
+        current_y = (self.height - min_nlines) // 2 if self.v_centered else 0
+        if self.outline:
+            current_y += 1
+        current_line_length = 0
+        current_line = ""
+        self.erase()
+        for word in text.split():
+            if current_y > self.height:
+                return
+            word_length = len(word)
+            while(word_length > self.width): # word is too large -- must be split across lines
+                if current_line_length == 0: # First word on line. Add what fits.
+                    fitting_text = word[:self.width]
+                    offset_x = self.get_offset_x(self.width, self.width)
+                    wprint(self._window, current_y, offset_x, fitting_text,\
+                            print_mode=self.printing_mode, delay=self.delay, pause_multiplier=self.pause_multiplier)
+                    word = word[self.width:]
+                    current_y += 1
+                else: # Second word on line, add space and what fits.
+                    remaining_space = self.width - word_length
+                    fitting_text = word[:word[remaining_space]]
+                    current_line = current_line + ' '  + fitting_text
+                    offset_x = self.get_offset_x(self.width, self.width)
+                    wprint(self._window, current_y, offset_x, current_line,\
+                            print_mode=self.printing_mode, delay=self.delay, pause_multiplier=self.pause_multiplier)
+                    word = word[self.width:]
+                    current_y += 1
+                    current_line = ''
+                word_length = len(word)
+            if current_line_length == 0: # First word on line. Add to line.
+                current_line = word
+                current_line_length = word_length
+                continue
+            prospective_length = current_line_length + 1 + word_length
+            if prospective_length < self.width: # 
+                current_line = current_line + ' ' + word
+                current_line_length = prospective_length
+            elif prospective_length == self.width: # Word will complete the line.
+                current_line = current_line + ' ' + word
+                offset_x = self.get_offset_x(prospective_length, self.width)
+                wprint(self._window, current_y, offset_x, current_line,\
+                       print_mode=self.printing_mode, delay=self.delay, pause_multiplier=self.pause_multiplier)
+                current_line = ""
+                current_line_length = 0
+                current_y += 1
+            else: # Word does not fit on line. Add it to next line.
+                offset_x = self.get_offset_x(prospective_length, self.width)
+                wprint(self._window, current_y, offset_x, current_line,\
+                       print_mode=self.printing_mode, delay=self.delay, pause_multiplier=self.pause_multiplier)
+                current_line = word
+                current_line_length = word_length
+                current_y += 1 
+        if current_line:
+            offset_x = self.get_offset_x(len(current_line), self.width)
+            wprint(self._window, current_y, offset_x, current_line,\
+                       print_mode=self.printing_mode, delay=self.delay, pause_multiplier=self.pause_multiplier)      
 
-    def read(self, parent: window, beg_y: int, beg_x: int,\
-                     mode: Literal["WORD"] | Literal["CHAR"] = "CHAR", timeout: float = 0.05):
-        if mode == "WORD":
-            builder = []
-            itera = self.text.split()
-        elif mode == "CHAR":
-            builder = ""
-            itera = self.text
-        else:
-            raise Exception("Invalid Mode - Valid Chunk Modes: 'CHAR', 'WORD'")
-        for block in itera:
-            if mode == "WORD":
-                builder.append(block)
-                text = " ".join(builder)
-                self.set_text(text)
-            if mode == "CHAR":
-                builder += block
-                self.set_text(builder)
-            self.write(parent, beg_y, beg_x)
-            parent.refresh()
-            sleep(timeout)
-
-    def format(self, parent: window, y: int, x: int, line: list[str]):
-        # writing in bottom left corner will automatically wrap to next line
-        # which may be out of bounds causing exception.
-        # we will just except it here and pass
-        try:
-            text = " ".join(line)
-            line_length = len(text)
-            parent.addstr(y, x + self.get_offset(line_length), text)
-        except curses.error:
-            pass 
-
-    def get_offset(self, line_length: int):
-        match (self.alignment):
-            case Align.RIGHT:
-                return (self.width - line_length)
-            case Align.CENTER:
-                return (self.width - line_length) // 2
-            case Align.LEFT:
-                ...
-        return 0
-      
 class Panel(_CurseWidget):
     '''An extenstion to curses.window object, whose visibility may be toggled.'''
     def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, outline: bool = False):
