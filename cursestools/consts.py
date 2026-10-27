@@ -1,25 +1,36 @@
 from curses import window
 from typing import TypeAlias
-from enum import Enum
+from enum import Enum, auto
+from os import name as os_name
 
 ESC = '\x1b'
-BKSP = '\x08'
 ENTER = '\n'
 TAB = '\t'
 CTRL_BKSP = '\x17'
-CTRL_SHFT_BKSP = '\x7f'
+
+if os_name == "nt":
+    BKSP = '\x08'
+    CTRL_SHFT_BKSP = '\x7f'
+else:
+    BKSP = '\x7f'
+    CTRL_SHFT_BKSP = '\x08'
 
 class Align(Enum):
-    LEFT = 1
-    RIGHT = 2
-    CENTER = 3
-    JUSTIFY = 4 # NOT IMPLEMENTED
+    LEFT = auto()
+    RIGHT = auto()
+    CENTER = auto()
+    JUSTIFY = auto() # NOT IMPLEMENTED
 
 class Dir(Enum):
-    UP = 0
-    DOWN = 1
-    LEFT = 2
-    RIGHT = 3
+    UP = auto()
+    DOWN = auto()
+    LEFT = auto()
+    RIGHT = auto()
+
+class PrintMode(Enum):
+    IMMEDIATE = auto()
+    BY_WORD = auto()
+    BY_CHAR = auto()
 
 PadType: TypeAlias = window
 ChType: TypeAlias = str | bytes | int

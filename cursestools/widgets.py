@@ -3,11 +3,10 @@ import curses
 from curses import window
 from .utils import *
 from .consts import *
-from typing import Literal, Callable
-from enum import Enum, auto
+from typing import Callable, Any
+from abc import ABC
 
-class _CurseWidget:
-    '''Emulate inheritance from curses.window which has @final decorator.'''
+class _CurseWidget(ABC):
     def __init__(self):
         self._self: window = ...
 
@@ -15,7 +14,6 @@ class _CurseWidget:
         return getattr(self._self, name)
 
 class Page(_CurseWidget):
-    '''A Pad-Like widget to abstract scrolling content that cannot all fit in the window at once.'''
     def __init__(self, parent: window, *, multiplier = 1, height = 0, width = 0):
         '''
         Initialize a Page object to be "laid" onto a parent window.\n
@@ -31,16 +29,16 @@ class Page(_CurseWidget):
         self.max_v_shift = height - par_h
         self.max_h_shift = width - par_w
 
-    def refresh(self):
+    def refresh(self) -> None:
         '''Make any update to the Console on the parent visible if not already.'''
         self.noutrefresh()
         curses.doupdate()
 
-    def noutrefresh(self):
+    def noutrefresh(self) -> None:
         '''Make any update to the Console on the parent visible if not already.'''
         lay(self._self, self.parent, self.v_shift, self.h_shift)
     
-    def shift(self, dir: Dir, unit: int = 1):
+    def shift(self, dir: Dir, unit: int = 1) -> None:
         '''Shift the console in "dir" directiion "unit" units.'''
         match (dir):
             case Dir.UP:
@@ -63,104 +61,114 @@ class Page(_CurseWidget):
     def get_parent_window(self) -> _CurseWidget | window:
         return self.parent
 
-    def reset_offset(self):
+    def reset_offset(self) -> None:
         '''Bring Console back to starting location on parent'''
         self.v_shift, self.h_shift = 0, 0
 
-    def get_offset(self):
+    def get_offset(self) -> None:
         return self.v_shift, self.h_shift
 
-    def set_offset(self, *, v_shift: int = -1, h_shift: int = -1):
+    def set_offset(self, *, v_shift: int = -1, h_shift: int = -1) -> None:
         if 0 < v_shift < self.max_v_shift:
             self.v_shift = v_shift
         if 0 < h_shift < self.max_h_shift:
             self.h_shift = h_shift
-    
-    def clear(self):
-        self._self.clear()
         
-class Terminal(_CurseWidget):
-    '''A Terminal to display, process, and submit keystrokes.'''
-    min_width = 3 + len("EDIT=FALSE")
-    min_height = 3
+class Terminal:
+    MIN_WIDTH = 3 + len("EDIT=FALSE")
+    MIN_HEIGHT = 3
     
-    def __init__(self, nlines, ncols, beg_y, beg_x, default: str = "> "):
-        if (nlines < Terminal.min_height) or (ncols < Terminal.min_width):
-            raise Exception(f"TERMINAL MIN <LINES, COLS> IS <{Terminal.min_height}, {Terminal.min_width}>")
+    def __init__(self, nlines, ncols, beg_y, beg_x, prompt: str = "> "):
+        if (nlines < Terminal.MIN_HEIGHT) or (ncols < Terminal.MIN_WIDTH):
+            raise Exception(f"TERMINAL MIN <LINES, COLS> IS <{Terminal.MIN_HEIGHT}, {Terminal.MIN_WIDTH}>")
         self.border = curses.newwin(nlines, ncols, beg_y, beg_x)
         self._self = curses.newwin(nlines - 2, ncols - 2, beg_y + 1, beg_x + 1)
-        self.default = default
-        self.max_chars = (ncols - 2) * (nlines - 2) - len(self.default)
+        self.prompt = prompt
+        self.max_chars = (ncols - 2) * (nlines - 2) - len(self.prompt)
         self.message = ""
         self.last_print = ""
         self.submitted = False
         self.editing = True
         self.noutrefresh()
-        self.binds: dict[str, Callable[[], None]] = {BKSP: self.delete,
-                                                     CTRL_BKSP: self.delete_last_word,
-                                                     CTRL_SHFT_BKSP: self.delete_all,
-                                                     ENTER: self.submit}
+        self.binds: dict[str, Callable[[], None]] = {BKSP: self._delete,
+                                                     CTRL_BKSP: self._delete_last_word,
+                                                     CTRL_SHFT_BKSP: self._delete_all,
+                                                     ENTER: self._submit}
+        self.commands: dict[str, Callable[[], None]] = {}
 
     def noutrefresh(self):
         self.border.box()
         self.border.addstr(0, 2, f"EDIT={repr(self.editing).upper()}", curses.A_STANDOUT)
-        self._print()
+        self._refresh_term()
         self.border.noutrefresh()
         self._self.noutrefresh()
 
-    def refresh(self):
+    def refresh(self) -> None:
         self.noutrefresh()
         curses.doupdate()
 
-    def submit(self):
+    def _submit(self):
         self.submitted = True
+        action = self.commands.get(self.peek_text(), None)
+        if not action is None:
+            action()
+
+    def add_command(self, command: str, action: Callable[[], None]) -> None:
+        self.commands[command] = action
+
+    def rm_command(self, command: str) -> None:
+        self.commands.pop(command)
     
-    def toggle_mode(self):
+    def _toggle_mode(self):
         self.editing = not self.editing
     
-    def delete(self):
+    def _delete(self):
         if len(self.message) > 0:
             self.message = self.message[:-1]
-            self.print()
+            self._update_term()
     
-    def delete_all(self):
+    def _delete_all(self):
         self.message = ''
-        self.print()
+        self._update_term()
 
-    def delete_last_word(self):
+    def _delete_last_word(self):
         words = self.message.split()
         if words:
             words.pop()
             self.message = ' '.join(words) + ' '
             if self.message == ' ':
                 self.message = ''
-        self.print()
+        self._update_term()
 
-    def print(self, key: str = ""):
+    def _update_term(self, key: str = ""):
         if key and key.isprintable() and len(self.message) < self.max_chars:
             self.message += key
         if self.message != self.last_print:
             self._self.clear()
-            self._print()
+            self._refresh_term()
             self.last_print = self.message
     
-    def _print(self):
+    def _refresh_term(self):
         self._self.clear()
         if len(self.message) == self.max_chars:
             # prevents OOB error due to curses' automatic wrap flag
             try:
-                self._self.addstr(0, 0, self.default + self.message)
+                self._self.addstr(0, 0, self.prompt + self.message)
             except curses.error:
                 pass
         else:
-            self._self.addstr(0, 0, self.default + self.message)
-    
+            self._self.addstr(0, 0, self.prompt + self.message)
+
+    def getkey(self) -> ChType:
+        return self._self.getkey()
+
     def proc_key(self, key: ChType) -> ChType:
         if key == TAB:
-            self.toggle_mode()
+            self._toggle_mode()
             self.refresh()
         elif self.editing:
-            self.binds.get(key, lambda: self.print(key))()
+            action = self.binds.get(key,lambda: self._update_term(key))
+            action()
         else: # key ignored
             return key
         self.refresh()
@@ -232,18 +240,27 @@ class TextBox:
             self._window.border()
         self._window.refresh()
 
-    def _get_x_offset_center(self, text_len, space_width):
-        border_offset_x = 1 if self.outline else 0
-        return border_offset_x + space_width - text_len
-    
-    def _get_x_offset_right(self, text_len, space_width):
+    def _get_x_offset_center(self, text_len: int, space_width: int):
         border_offset_x = 1 if self.outline else 0
         return border_offset_x + (space_width - text_len) // 2
     
-    def _get_x_offset_left(self, text_len, space_width):
+    def _get_x_offset_right(self, text_len: int, space_width: int):
+        border_offset_x = 1 if self.outline else 0
+        return border_offset_x + space_width - text_len
+    
+    def _get_x_offset_left(self, text_len: Any, space_width: Any):
         border_offset_x = 1 if self.outline else 0
         return border_offset_x
-
+    
+    def _get_y_offset(self, text: str):
+        current_y = 1 if self.outline else 0
+        if not self.v_centered:
+            return current_y
+        min_nlines = self._get_min_nlines(text)
+        if self.height < min_nlines:
+            return current_y
+        return current_y + (self.height - self._get_min_nlines(text)) // 2
+        
     def set_printing_configuration(self, *, align: Align | None = None, v_centered: bool | None = None,\
                                    printing_mode: PrintMode | None = None, delay: float | None = None, pause_multiplier: int | None = None) -> None:
         if not v_centered is None:
@@ -266,8 +283,6 @@ class TextBox:
 
     def _get_min_nlines(self, text: str):
         current_y = 0
-        if self.outline:
-            current_y += 1
         current_line_length = 0
         current_line = ""
         self.erase()
@@ -305,19 +320,15 @@ class TextBox:
                 current_y += 1
         return current_y
 
-    def write(self, text: str) -> None:
-        min_nlines = self._get_min_nlines(text)
-        if self.height < min_nlines:
-            raise Exception(f"Textbox MUST have MINIMUM {min_nlines + 2 if self.outline else min_nlines} LINES given # COLS")
-        current_y = (self.height - min_nlines) // 2 if self.v_centered else 0
-        if self.outline:
-            current_y += 1
+    def print(self, text: str) -> None:
+        current_y = self._get_y_offset(text)
         current_line_length = 0
         current_line = ""
         self.erase()
-        for word in text.split():
+        words = text.split()
+        for index, word in enumerate(text.split()):
             if current_y > self.height:
-                return
+                return " ".join(words[index - 1:])
             word_length = len(word)
             while(word_length > self.width): # word is too large -- must be split across lines
                 if current_line_length == 0: # First word on line. Add what fits.
@@ -355,7 +366,7 @@ class TextBox:
                 current_line_length = 0
                 current_y += 1
             else: # Word does not fit on line. Add it to next line.
-                offset_x = self.get_offset_x(prospective_length, self.width)
+                offset_x = self.get_offset_x(current_line_length, self.width)
                 wprint(self._window, current_y, offset_x, current_line,\
                        print_mode=self.printing_mode, delay=self.delay, pause_multiplier=self.pause_multiplier)
                 current_line = word
@@ -367,8 +378,7 @@ class TextBox:
                        print_mode=self.printing_mode, delay=self.delay, pause_multiplier=self.pause_multiplier)      
 
 class Panel(_CurseWidget):
-    '''An extenstion to curses.window object, whose visibility may be toggled.'''
-    def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, outline: bool = False):
+    def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, *, outline: bool = False):
         self.outline = outline
         if self.outline:
             self.border = curses.newwin(nline, ncols, beg_y, beg_x)
@@ -377,13 +387,13 @@ class Panel(_CurseWidget):
             self._self = curses.newwin(nline, ncols, beg_y, beg_x)
         self.visible = True
     
-    def refresh_border(self):
+    def _refresh_border(self):
         self.border.box()
         self.border.noutrefresh()
 
     def noutrefresh(self):
         if self.outline:
-            self.refresh_border()
+            self._refresh_border()
         else:
             self._self.noutrefresh()
 
@@ -399,7 +409,7 @@ class Panel(_CurseWidget):
         '''Display any content in panel, or overlay if present'''
         self.visible = True
         if self.outline:
-            self.refresh_border()
+            self._refresh_border()
         uncover(self._self)
         curses.doupdate()
 
@@ -409,21 +419,18 @@ class Panel(_CurseWidget):
         Content in Panel and overlay are preserved'''
         self.visible = False
         if self.outline:
-            self.refresh_border()
+            self._refresh_border()
         cover(self._self)
         curses.doupdate()
 
 class Canvas(Panel):
-    '''
-    Panel-like window whose purpose is to be overlaid by Pad-like windows.\n
-    Canvas should not be written to, but will not stop you in the case that you do.'''
     def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, *, outline: bool = False, overlay = None):
         self.overlay = overlay
-        super().__init__(nline, ncols, beg_y, beg_x, outline)
+        super().__init__(nline, ncols, beg_y, beg_x, outline=outline)
 
     def noutrefresh(self):
         if self.outline:
-            self.refresh_border()
+            self._refresh_border()
         if self.overlay:
             lay(self.overlay, self._self)
     
@@ -441,7 +448,7 @@ class Canvas(Panel):
         '''Display any content in panel, or overlay if present'''
         self.visible = True
         if self.outline:
-            self.refresh_border()
+            self._refresh_border()
         if self.overlay:
             lay(self.overlay, self._self)
         curses.doupdate()
