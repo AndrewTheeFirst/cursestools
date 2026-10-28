@@ -1,8 +1,9 @@
 import curses
 from curses import window
-from .utils import *
 from .consts import *
+from .utils import *
 from typing import Literal, Callable
+from time import sleep
 
 class _CurseWidget:
     '''Emulate inheritance from curses.window which has @final decorator.'''
@@ -338,8 +339,7 @@ class Panel(_CurseWidget):
         curses.doupdate()
 
     def hide(self):
-        '''
-        Hide any content in panel, or overlay if present\n
+        '''Hide any content in panel, or overlay if present\n
         Content in Panel and overlay are preserved'''
         self.visible = False
         if self.outline:
@@ -348,17 +348,21 @@ class Panel(_CurseWidget):
         curses.doupdate()
 
 class Canvas(Panel):
-    '''
-    Panel-like window whose purpose is to be overlaid by Pad-like windows.\n
-    Canvas should not be written to, but will not stop you in the case that you do.'''
-    def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, *, outline: bool = False, overlay = None):
+    def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, *, outline: bool = False, overlay: PadType | Page = None):
         self.overlay = overlay
         super().__init__(nline, ncols, beg_y, beg_x, outline)
 
     def noutrefresh(self):
         if self.outline:
-            self.refresh_border()
-        if self.overlay:
+            self._refresh_border()
+        self._lay_overlay()
+
+    def _lay_overlay(self):
+        if self.overlay is None:
+            return
+        if isinstance(self.overlay, Page):
+            lay(self.overlay._self, self._self, *self.overlay.get_offset())
+        else:
             lay(self.overlay, self._self)
     
     def set_overlay(self, overlay: PadType):
@@ -375,7 +379,6 @@ class Canvas(Panel):
         '''Display any content in panel, or overlay if present'''
         self.visible = True
         if self.outline:
-            self.refresh_border()
-        if self.overlay:
-            lay(self.overlay, self._self)
+            self._refresh_border()
+        self._lay_overlay()
         curses.doupdate()
