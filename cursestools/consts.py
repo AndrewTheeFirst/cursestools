@@ -31,6 +31,3 @@ class PrintMode(Enum):
     IMMEDIATE = auto()
     BY_WORD = auto()
     BY_CHAR = auto()
-
-PadType: TypeAlias = window
-ChType: TypeAlias = str | bytes | int

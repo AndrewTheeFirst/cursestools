@@ -1,10 +1,10 @@
 from curses import window
-from typing import overload, TypeAlias, Callable
+from typing import overload, Callable
 from enum import Enum
 from abc import ABC
 
-PadType: TypeAlias = window
-ChType: TypeAlias = str | bytes | int
+type PadType = window | Page
+type ChType = str | bytes | int
 
 ESC = ...
 BKSP = ...
@@ -135,6 +135,6 @@ class Canvas(Panel):
     Panel-like window whose purpose is to be overlaid by Pad-like windows.\n
     Canvas isn't meant be written to, but will not stop you in the case that you do.
     '''
-    def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, *, outline: bool = False, overlay = None): ...
+    def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, *, outline: bool = False, overlay: PadType = None): ...
     def set_overlay(self, overlay: PadType) -> None: ...
     def remove_overlay(self) -> None: ...
