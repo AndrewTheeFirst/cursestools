@@ -1,10 +1,11 @@
-from __future__ import annotations
 import curses
 from curses import window
-from .utils import *
 from .consts import *
 from typing import Callable, Any
 from abc import ABC
+
+type PadType = window | Page
+type ChType = str | bytes | int
 
 class _CurseWidget(ABC):
     def __init__(self):
@@ -36,6 +37,7 @@ class Page(_CurseWidget):
 
     def noutrefresh(self) -> None:
         '''Make any update to the Console on the parent visible if not already.'''
+        from .utils import lay
         lay(self._self, self.parent, self.v_shift, self.h_shift)
     
     def shift(self, dir: Dir, unit: int = 1) -> None:
@@ -65,7 +67,7 @@ class Page(_CurseWidget):
         '''Bring Console back to starting location on parent'''
         self.v_shift, self.h_shift = 0, 0
 
-    def get_offset(self) -> None:
+    def get_offset(self) -> tuple[int, int]:
         return self.v_shift, self.h_shift
 
     def set_offset(self, *, v_shift: int = -1, h_shift: int = -1) -> None:
@@ -73,7 +75,7 @@ class Page(_CurseWidget):
             self.v_shift = v_shift
         if 0 < h_shift < self.max_h_shift:
             self.h_shift = h_shift
-        
+
 class Terminal:
     MIN_WIDTH = 3 + len("EDIT=FALSE")
     MIN_HEIGHT = 3
@@ -321,6 +323,7 @@ class TextBox:
         return current_y
 
     def print(self, text: str) -> None:
+        from .utils import wprint
         current_y = self._get_y_offset(text)
         current_line_length = 0
         current_line = ""
@@ -407,6 +410,7 @@ class Panel(_CurseWidget):
     
     def show(self):
         '''Display any content in panel, or overlay if present'''
+        from .utils import uncover
         self.visible = True
         if self.outline:
             self._refresh_border()
@@ -414,9 +418,9 @@ class Panel(_CurseWidget):
         curses.doupdate()
 
     def hide(self):
-        '''
-        Hide any content in panel, or overlay if present\n
+        '''Hide any content in panel, or overlay if present\n
         Content in Panel and overlay are preserved'''
+        from .utils import cover
         self.visible = False
         if self.outline:
             self._refresh_border()
@@ -424,14 +428,22 @@ class Panel(_CurseWidget):
         curses.doupdate()
 
 class Canvas(Panel):
-    def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, *, outline: bool = False, overlay = None):
+    def __init__(self, nline: int, ncols: int, beg_y: int, beg_x: int, *, outline: bool = False, overlay: PadType = None):
         self.overlay = overlay
         super().__init__(nline, ncols, beg_y, beg_x, outline=outline)
 
     def noutrefresh(self):
         if self.outline:
             self._refresh_border()
-        if self.overlay:
+        self._lay_overlay()
+
+    def _lay_overlay(self):
+        from .utils import lay
+        if self.overlay is None:
+            return
+        if isinstance(self.overlay, Page):
+            lay(self.overlay._self, self._self, *self.overlay.get_offset())
+        else:
             lay(self.overlay, self._self)
     
     def set_overlay(self, overlay: PadType):
@@ -449,6 +461,5 @@ class Canvas(Panel):
         self.visible = True
         if self.outline:
             self._refresh_border()
-        if self.overlay:
-            lay(self.overlay, self._self)
+        self._lay_overlay()
         curses.doupdate()

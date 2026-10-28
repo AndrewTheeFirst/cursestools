@@ -1,6 +1,7 @@
 import curses
 from curses import window
-from .consts import PadType, PrintMode
+from .consts import PrintMode
+from .widgets import PadType
 from time import sleep
 from curses.textpad import rectangle
 from typing import overload
